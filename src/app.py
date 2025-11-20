@@ -5,11 +5,14 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 import os
+import json
 from pathlib import Path
+from typing import Optional
 
 app = FastAPI(title="Mergington High School API",
               description="API for viewing and signing up for extracurricular activities")
@@ -18,6 +21,40 @@ app = FastAPI(title="Mergington High School API",
 current_dir = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
           "static")), name="static")
+
+# Load teacher credentials
+def load_teachers():
+    teachers_file = os.path.join(Path(__file__).parent, "teachers.json")
+    with open(teachers_file, 'r') as f:
+        return json.load(f)
+
+teachers_data = load_teachers()
+
+# Pydantic models
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+# Helper function to verify teacher credentials
+def verify_teacher(username: str, password: str) -> bool:
+    for teacher in teachers_data["teachers"]:
+        if teacher["username"] == username and teacher["password"] == password:
+            return True
+    return False
+
+# Helper function to check if request has valid admin token
+def is_admin(authorization: Optional[str] = None) -> bool:
+    if not authorization:
+        return False
+    # Simple token format: "Bearer username:password"
+    if not authorization.startswith("Bearer "):
+        return False
+    token = authorization[7:]  # Remove "Bearer " prefix
+    try:
+        username, password = token.split(":", 1)
+        return verify_teacher(username, password)
+    except:
+        return False
 
 # In-memory activity database
 activities = {
@@ -83,14 +120,29 @@ def root():
     return RedirectResponse(url="/static/index.html")
 
 
+@app.post("/auth/login")
+def login(request: LoginRequest):
+    """Authenticate a teacher and return a token"""
+    if verify_teacher(request.username, request.password):
+        # In a real application, you'd use JWT or a proper session token
+        token = f"{request.username}:{request.password}"
+        return {"success": True, "token": token, "username": request.username}
+    else:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
 @app.get("/activities")
 def get_activities():
     return activities
 
 
 @app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
-    """Sign up a student for an activity"""
+def signup_for_activity(activity_name: str, email: str, authorization: Optional[str] = Header(None)):
+    """Sign up a student for an activity (requires admin login)"""
+    # Check if user is authenticated as admin
+    if not is_admin(authorization):
+        raise HTTPException(status_code=403, detail="Admin login required to register students")
+    
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
@@ -111,8 +163,12 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
-    """Unregister a student from an activity"""
+def unregister_from_activity(activity_name: str, email: str, authorization: Optional[str] = Header(None)):
+    """Unregister a student from an activity (requires admin login)"""
+    # Check if user is authenticated as admin
+    if not is_admin(authorization):
+        raise HTTPException(status_code=403, detail="Admin login required to unregister students")
+    
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")

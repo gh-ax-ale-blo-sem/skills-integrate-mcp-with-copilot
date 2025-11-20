@@ -1,0 +1,12 @@
+{
+  "teachers": [
+    {
+      "username": "mona.teacher",
+      "password": "github2025"
+    },
+    {
+      "username": "octocat.admin",
+      "password": "admin123"
+    }
+  ]
+}
